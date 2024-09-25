@@ -1,0 +1,1944 @@
+---
+title: Figures for Paper
+date: "Compiled: `r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    df_print: paged
+    theme: flatly
+    toc: true
+    toc_float: true
+    number_sections: true
+params:
+  functions_file: "/home/sc-analysis/analysis/functions.R"
+  functions_mcgill_file: "/home/sc-analysis/analysis/functions_mcgill.R"
+  metadata: "/home/sc-analysis/analysis/metadata/metadata_FCD.rds"
+  region: NULL
+---
+
+# Setup
+
+Load libraries and functions:
+
+```{r setup, message = FALSE, warning=FALSE}
+library(Seurat, lib.loc = "/home/sc-analysis/R/x86_64-pc-linux-gnu-library/4.1")
+library(SeuratObject, lib.loc = "/home/sc-analysis/R/x86_64-pc-linux-gnu-library/4.1")
+library(SeuratData, lib.loc = "/home/sc-analysis/R/x86_64-pc-linux-gnu-library/4.1")
+library(Signac, lib.loc = "/home/sc-analysis/R/x86_64-pc-linux-gnu-library/4.1")
+library(Azimuth, lib.loc = "/home/sc-analysis/R/x86_64-pc-linux-gnu-library/4.1")
+library(org.Hs.eg.db)
+library(tidyverse)
+library(glue)
+library(reshape2)
+library(pheatmap)
+library(RColorBrewer)
+library(cowplot)
+library(readxl)
+library(xlsx)
+library(broom)
+library(dittoSeq)
+library(EnhancedVolcano)
+library(AUCell)
+library(escape)
+library(GSEABase)
+library(VennDiagram)
+library(clusterProfiler)
+library(rrvgo)
+library(speckle)
+library(limma)
+library(ArchR)
+library(scales)
+library(monocle3)
+
+source(params$functions_file)
+source(params$functions_mcgill_file)
+
+set.seed(1234)
+
+knitr::opts_chunk$set(warning = FALSE, message=FALSE)
+```
+
+# Configuration
+
+```{r}
+def <- knitr::knit_hooks$get("output")
+knitr::knit_hooks$set(output = function(x, options) {
+  x <- def(x, options)
+  ifelse(!is.null(options$suppress), gsub(pattern = "```.*```", "", x), x)
+})
+```
+
+
+```{r}
+if (!is.null(params$region)){
+  regname <- params$region
+  reg <- paste0("_", regname)
+} else {
+  regname <- ""
+  reg <- regname
+}
+```
+
+# Load data
+
+```{r}
+so <- readRDS(paste0("./so_multiome", reg, ".rds"))
+```
+
+# Define Colors
+
+```{r colors}
+# Defining colors for the histological assessment
+ha_cols <- brewer.pal(3, "Dark2")
+names(ha_cols) <- c("FCD IIa", "FCD IIb", "Normal")
+
+# Defining colors for the simplified consensus annotation 
+
+colors <- set_qual_pal(11)
+names(colors) <- sort(unique(so$consensus.annot.simp))
+
+# Visualize colors 
+seePalette <- function(){
+  # create data that references the palette
+  colorKey = data.frame(colorName=names(colors))
+  # plot with ggplot, referencing the palette
+  ggplot(data=colorKey, aes(x=1, y = 1:nrow(colorKey), fill=colorName, label=colorName)) +
+    geom_tile() +
+    scale_fill_manual(values = colors) +
+    theme_void()+
+    theme(legend.position="none") + 
+    geom_text()
+}
+
+seePalette()
+
+# Change EN Upper and EN Deeper to 2 shades of green 
+colors["EN Upper"] <- "#3FCA2B"
+colors["EN Deeper"] <- "#148210"
+
+# Change Endo color - it was green 
+colors["Endo"] <- "#33B6EF"
+
+# Change Unknown color to brown
+colors["Unknown"] <- "#653B04"
+
+
+# See palette again 
+seePalette()
+
+```
+
+
+# Figure 1
+
+## A) Biorender scheme
+
+
+## B) Harmony integration across batches - RNA + ATAC
+
+
+```{r 1b.compute}
+# Compute joint
+
+so <- FindMultiModalNeighbors(
+  object = so,
+  reduction.list = list("pca", "lsi"), #one for each modality, pca = RNA, lsi = ATAC
+  k.nn = 20, # the number of multimodal neighbors to compute. 20 nearest neighbors for each cell (default)
+  dims.list = list(1:50, 2:40), #dimensions for each reduction to use
+  modality.weight.name = "RNA.weight", # Variable name to store modality weight in object meta data
+  snn.graph.name = "wsnn", #Multimodal neighbor snn graph name
+  weighted.nn.name = "weighted.nn.merged", # Multimodal neighbor object name
+  verbose = TRUE
+)
+
+so <- RunUMAP(so, 
+               nn.name = "weighted.nn.merged", #Name of knn output on which to run UMAP
+               reduction.name = 'umap.joint.merged',
+               assay = "RNA", 
+               verbose = FALSE)
+```
+
+```{r 1b.1, fig.width = 12, fig.height = 6}
+# RNA + ATAC
+
+# Batches 
+so$seq_batch <- factor(so$seq_batch, levels = c("10/2022", "07/2023", "09/2023"))
+Idents(so) <- "seq_batch" 
+
+# Batches 
+fig1b_int <- DimPlot(so, 
+                  reduction = "umap.joint", 
+                  group.by = "seq_batch",
+                  order = c("10/2022", "07/2023"),
+                  cols = c("#e7298a", "#66a61e", "#80b1d3")) + 
+  labs(title = "RNA + ATAC", x = "umap.harmony1", y = "umap.harmony2", subtitle = "Integrated", color = "Sequencing batch") + 
+  theme(plot.subtitle = element_text(hjust = 0.5, size = 22),
+        plot.title = element_text(size = 24),
+        axis.ticks = element_blank(),
+        axis.text = element_blank())
+fig1b_int[[1]]$layers[[1]]$aes_params$alpha = 0.3
+
+fig1b_int
+
+# Compare with merged 
+fig1b_merged <- DimPlot(so, 
+                  reduction = "umap.joint.merged", 
+                  group.by = "seq_batch",
+                  order = c("10/2022", "07/2023"),
+                  cols = c("#e7298a", "#66a61e", "#80b1d3")) + 
+  labs(title = "RNA + ATAC", subtitle = "Merged", x = "umap.harmony1", y = "umap.harmony2", color = "Sequencing batch") + 
+  theme(plot.subtitle = element_text(hjust = 0.5, size = 22),
+        plot.title = element_text(size = 24),
+        legend.position = "none",
+        axis.ticks = element_blank(),
+        axis.text = element_blank())
+fig1b_merged[[1]]$layers[[1]]$aes_params$alpha = 0.3
+
+fig1b_merged
+
+# Comparison
+comp1b <- fig1b_merged + fig1b_int
+comp1b
+
+```
+
+## C) Simplified consensus annotation - UMAP RNA + ATAC
+
+
+
+```{r 1c}
+# Create new column changing Unknown to Unclassified just for labeled plots 
+so$consensus.annot.simp2 <- str_replace(so$consensus.annot.simp, "Unknown", "Unclassified")
+so$consensus.annot.simp2 <- str_replace(so$consensus.annot.simp2, "EN Deeper", "EN Deep")
+colors2 <- colors
+names(colors2) <- str_replace(names(colors), "Unknown", "Unclassified")
+names(colors2) <- str_replace(names(colors2), "EN Deeper", "EN Deep")
+colors2
+
+fig1c <- DimPlot(so, 
+                 group.by = "consensus.annot.simp2", 
+                 reduction = "umap.joint", 
+                 cols = colors2) + 
+  labs(title = "Simplified Annotation", subtitle = paste0(ncol(so), " cells")) + 
+  theme(plot.subtitle = element_text(hjust = 0.5, size = 22),
+        plot.title = element_text(size = 24))
+
+fig1c <- labels(fig1c, "consensus.annot.simp2")
+
+fig1c
+```
+
+
+## D) Detailed consensus annotation - UMAP RNA + ATAC
+
+```{r 1d}
+unique(so$consensus.annot)
+so@meta.data <- so@meta.data %>% mutate(consensus.annot.renamed = case_when(str_detect(consensus.annot, "EN L\\d") ~ str_extract(consensus.annot, "EN L\\d[/\\d]*"), consensus.annot == "Unknown" ~ "Unclassified",  TRUE ~ consensus.annot))
+unique(so$consensus.annot.renamed)
+
+colors_detailed <- set_qual_pal(length(unique(so$consensus.annot.renamed)))
+colors_detailed <- c(colors2, colors_detailed)
+colors_detailed <-  colors_detailed[!duplicated(colors_detailed)]
+names(colors_detailed) <- c(names(colors2), c("EN L2/3", "EN L5", "EN L6", "EN L5/6", "Pvalb", "Sst", "Vip", "Sncg/Lamp5", "Lamp5"))
+colors_detailed["EN L6"] <- "darkblue"
+colors_detailed["Pvalb"] <- "#b073ff"
+colors_detailed["EN L2/3"] <- colors_detailed["EN Upper"]
+colors_detailed["Sst"] <- "#fa2f76"
+colors_detailed["Vip"] <- "grey"
+
+fig1d <- DimPlot(so, 
+                 group.by = "consensus.annot.renamed", 
+                 reduction = "umap.joint", 
+                 cols = colors_detailed) + 
+  labs(title = "Detailed Annotation", subtitle = paste0(ncol(so), " cells")) + 
+  theme(plot.subtitle = element_text(hjust = 0.5, size = 22),
+        plot.title = element_text(size = 24))
+
+fig1d <- labels(fig1d, "consensus.annot.renamed")
+
+fig1d
+```
+
+
+## E) UMAP ATAC + RNA colored by histological assessment
+
+```{r 1e}
+# Try split by 
+fig1e_split <- DimPlot(so, 
+                 group.by = "ha3",
+                 split.by = "ha3",
+                 reduction = "umap.joint", 
+                 cols = ha_cols) +
+  theme(plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        strip.text.x = element_text(size = 24),
+        legend.position = "none") 
+
+fig1e_split
+
+# Add in inkscape how many cells there are from each tissue 
+table(so$ha3)
+```
+
+
+## F) Dotplot of canonical cell markers
+
+-   Neuronal:
+
+    -   Excitatory Neurons: KCNIP4, R3HDM1, PPP3CA, SLC17A7
+
+        -   Upper Layers: CUX1, CUX2
+
+        -   Deeper Layers: SEMA3E, FOXP2, RORB
+
+    -   Inhibitory Neurons: GAD1, GAD2, ADARB2, SYNPR
+
+        -   Lamp5: LAMP5, FGF13, ADARB2
+
+        -   Pvalb: PVALB, BTBD11, ZNF804A, SCN1A-AS1
+
+        -   Sst: SST, GRIK1, SYNPR
+
+        -   Sncg: ADARB2, PRELID2, CXCL14
+
+        -   Vip: VIP, ADARB2, RGS12, SYNPR
+
+        -   Although these subtypes of interneurons are named according to a gene they express, they are not listed as their main marker
+
+-   Astrocytes: SLC1A2, SCL1A3, GFAP, AQP4
+
+-   Microglia: CD68, CD45 (PTPRC), DOCK8, CD86 (activated state marker)
+
+-   Endothelial cells: CLDN5, PECAM1, CD34, FLT1
+
+-   Oligodendrocytes: PLP1, MOBP, MBP, SAT18
+
+-   OPCs: PDGFRA, VCAN, TNR, GPR17 (differentiation-commited OPC)
+
+-   VLMC: LAMA2, RBMS3
+
+```{r 1f}
+Idents(so) <- "consensus.annot.simp2"
+so$consensus.annot.simp2 <- factor(so$consensus.annot.simp2, levels = rev(c("Astro", "EN Upper", "EN Deep", "Endo", "IN", "Microglia", "Oligo", "OPC", "OPC Diff.", "Unclassified", "VLMC")))
+
+fig1f <- DotPlot(so,
+        features = c("KCNIP4", "R3HDM1", "PPP3CA", "SLC17A7", "CUX1", "CUX2", "SEMA3E", "FOXP2", "RORB", "GAD1", "GAD2", "ADARB2", "SYNPR", "SLC1A2", "SLC1A3", "GFAP", "AQP4", "CD68", "PTPRC", "DOCK8", "CD86", "CLDN5", "PECAM1", "CD34", "FLT1", "PLP1", "MOBP", "MBP", "ST18", "PDGFRA", "VCAN", "TNR", "GPR17", "LAMA2", "RBMS3"),
+        group.by = "consensus.annot.simp2",
+        idents = rev(c("Astro", "EN Upper", "EN Deep", "Endo", "IN", "Microglia", "Oligo", "OPC", "OPC Diff.", "VLMC")),
+        cols = "RdBu", dot.scale = 3) + 
+  labs(x = "Gene", y = "Cell Type") +
+  theme(axis.text.y = element_text(size = 18),
+        axis.text.x = element_text(angle = 90, size = 12, hjust = 1))
+
+fig1f
+
+so$consensus.annot.simp2 <- factor(so$consensus.annot.simp2, levels = c("Astro", "EN Upper", "EN Deep", "Endo", "IN", "Microglia", "Oligo", "OPC", "OPC Diff.", "Unclassified", "VLMC"))
+
+```
+
+
+## H) Speckle Plot
+
+```{r 1h.calculate}
+# 1) Get transformed props 
+props <- getTransformedProps(clusters = so$consensus.annot.simp2, 
+                             sample = so$sample_rep, 
+                             transform= "logit")
+
+props
+
+# 2 - Define the experimental design for differential abundance testing:
+design <- data.frame(so@meta.data)[,c("sample_rep", "histological_assessment")]
+design <- distinct(design)
+rownames(design) <- design$sample
+
+design$histological_assessment <- factor(design$histological_assessment, 
+                                            levels = c("Normal", "FCD_typeIIa", "FCD_typeIIb"))
+
+## Reorder rownames to match columns of props$Counts
+design <- design[colnames(props$Counts), , drop=FALSE]
+all(rownames(design) == colnames(props$Counts))
+
+colnames(design)[2] <- "group"
+
+design
+
+
+
+# Step 3 - Perform DA (differential abundance) testing: 
+
+## FCD IIa vs controls
+
+# - Decreased: EN upper
+# - Increased: Oligo, Unknown
+
+# the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+contrast.1 <- c("groupFCD_typeIIa - groupNormal") 
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.1, levels=model)
+mod.constrast
+
+da_results_1 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_results_1
+
+
+# # FCD IIb vs controls
+ 
+# - Decreased: EN upper 
+# - Increased: Oligo, Unknown, Microglia
+
+contrast.2 <- c("groupFCD_typeIIb - groupNormal")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.2, levels=model)
+mod.constrast
+
+da_results_2 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_results_2
+
+# # FCD IIb vs IIa
+
+# - Decreased: none
+# - Increased: Microglia
+
+contrast.3 <- c("groupFCD_typeIIb - groupFCD_typeIIa")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.3, levels=model)
+mod.constrast
+
+da_results_3 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_results_3
+
+
+```
+```{r 1h.plot, fig.height = 5, fig.width = 12}
+df_plot <- melt(props$Proportions, value.name = "prop")
+
+# Add donor condition
+df_plot <- left_join(df_plot, design, by = c("sample" = "sample_rep"))
+
+df_plot <- df_plot %>% 
+  mutate(group = case_match(group, 
+                           "FCD_typeIIa" ~ "FCD IIa",
+                           "FCD_typeIIb" ~ "FCD IIb",
+                           "Normal" ~ "Normal"),
+         clusters = factor(df_plot$cluster, levels = c("Astro", "EN Upper", "EN Deeper", "Endo", "IN", "Microglia", "Mixed EN + Glia", "Oligo", "OPC", "OPC Diff.", "VLMC")))
+
+
+my_theme <- theme_bw() +
+  theme(axis.text = element_text(size=14, color = "black"),
+        #axis.ticks.x = element_blank(),
+        #axis.text.x = element_blank(),
+        axis.title = element_text(face="plain", colour="black", size=14),
+        panel.background=element_blank(),
+        #panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        legend.text = element_text(face="plain", colour="black", size=12),
+        #legend.title = element_blank(),
+        legend.position = "right",
+        plot.title = element_text(face="plain", colour="black", size=14, hjust = 0)
+  ) 
+
+
+fig1h <- ggplot(df_plot %>% filter(group %in% c("FCD IIa", "FCD IIb", "Normal")),
+       aes(x = clusters, y=prop, fill = group, color = group)) + 
+  #geom_jitter() +
+  #geom_violin(trim = FALSE, alpha = 0.5, na.rm = TRUE) +
+  geom_boxplot(
+               outlier.shape = NA,
+               na.rm = TRUE, 
+               width = 0.3,
+               fill = "white",
+               lwd = 1.5,
+               position=position_dodge(0.8)) +
+  geom_point(aes(fill = group, color = group),
+             position = position_jitterdodge(
+               jitter.width = 0.1,
+               jitter.height = 0,
+               dodge.width = 0.8),
+             alpha=0.3)+
+  labs(x = "", y = "Proportion", fill = "Histological\nassessment", color = "Histological\nassessment") +
+  scale_fill_manual(values = ha_cols) +
+  scale_color_manual(values = ha_cols) +
+  scale_y_continuous(expand = expand_scale(add = c(0.03, 0.08))) +
+  my_theme
+
+fig1h
+
+```
+
+
+
+
+# Figure 2 - Identification of Disease-Associated Neurons (DANs).
+
+## A) Pizza chart of the cell type composition of the Mixed population: show % by condition - IIa, IIb and control
+
+## B) Bar chart of overrepresented diseases 
+
+## C) Dotplot to show neuronal markers, including NEFN
+
+
+```{r 3b}
+
+DefaultAssay(so) <- "SCT.corrected"
+
+so@meta.data <- so@meta.data %>% 
+  mutate(consensus.annot.simp3 = str_replace(consensus.annot.simp2, "Unclassified", "DS Cluster"))
+
+so@meta.data <- so@meta.data %>% 
+  mutate(consensus.annot.simp3 = factor(consensus.annot.simp3, levels = rev(sort(unique(so$consensus.annot.simp3)))))
+
+Idents(so) <- "consensus.annot.simp3"
+
+
+fig3c <- DotPlot(so, 
+                 features = c("NEFL", "NEFM", "NDUFA4", "COX5B", "COX6A1", "COX6C", "COX7C", "CYCS", "CALM2", "CALM3", "CALM1", "UCHL1", "TUBA1A", "NPY", "ACTB", "ACTG1", "TUBA1B", "TUBB2A", "TUBB4B", "PDYN", "UBB", "GAPDH", "HSPA8", "ATP6V0C", "ATP5MC3", "ATP6V06"),
+        group.by = "consensus.annot.simp3",
+        idents = c("Oligo", "EN Deep", "EN Upper", "DS Cluster"),
+        cols = "RdBu", 
+        dot.scale = 6,
+        scale = TRUE
+        ) + 
+  labs(x = "Gene", y = "Cell Type") +
+  theme(axis.text.x = element_text(angle = 90, size = 10, hjust = 1),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_text(size = 12))
+
+fig3c
+
+
+Idents(so) <- "consensus.annot.simp"
+so$consensus.annot.simp <- factor(so$consensus.annot.simp, levels = c("Astro", "EN Upper", "EN Deeper", "Endo", "IN", "Microglia", "Oligo", "OPC", "OPC Diff.", "Unknown", "VLMC"))
+```
+
+## D) Violin plots of NEFL and NEFM gene expression 
+
+## E) Coverage plots of NEFL, NEFM, UCHL1 and PDYN in EN Upper, EN Deep, Oligo and DS Cluster 
+
+## F) Dysmorphic neuron signature quantification - signature by Baldassari et al 
+
+## G) RNA UMAP Feature plots showing Unknown populations in disease, internal controls and Linnarsson
+
+
+```{r read_Linnarsson}
+so_rna <- readRDS("./so_RNA_FCD_LinnarssonControls.rds")
+```
+
+```{r 3g1, fig.height = 6, fig.width = 8}
+so_rna$consensus.annot.simp2 <- str_replace(so_rna$consensus.annot.simp, "Unknown", "Unclassified")
+so_rna$consensus.annot.simp2 <- str_replace(so_rna$consensus.annot.simp2, "EN Deeper", "EN Deep")
+
+fig3g1 <- DimPlot(so_rna, 
+                 group.by = "consensus.annot.simp2", 
+                 reduction = "umap.rna.harmony", 
+                 cols = colors2) + 
+  labs(title = "Simplified Annotation", subtitle = paste0(ncol(so_rna), " cells")) + 
+  theme(plot.subtitle = element_text(hjust = 0.5, size = 22),
+        plot.title = element_text(size = 24),
+        axis.ticks = element_blank(), 
+        axis.text = element_blank())
+
+fig3g1
+```
+
+```{r 3g2, fig.height = 6, fig.width=16}
+
+
+so_rna$isUnclassified <- ifelse(so_rna$consensus.annot.simp2 == "Unclassified", 1, 0)
+
+fig3g2 <- DimPlot(so_rna, 
+            group.by = "isUnclassified",
+            reduction = "umap.rna.harmony",
+            split.by = "ha4", 
+            cols = c("light grey", "#653B04")) +
+  theme(plot.title = element_text(size = 24),
+        strip.text.x = element_text(size = 20),
+        axis.text = element_blank(), 
+        axis.ticks = element_blank()) + 
+  NoLegend()
+
+fig3g2
+```
+
+
+# Figure 3 - Microglia Subtypes 
+
+```{r}
+Idents(so) <- so$consensus.annot.simp
+so.filt <- subset(x = so, idents = 'Microglia')
+
+sub.markers <- readRDS("outs/5.4_Markers/SubclusterMarkers/MicrogliaMarkers.rds")
+sex_genes <- readRDS("outs/5.3_sex_genes.rds")
+```
+
+```{r}
+so.filt@meta.data <- so.filt@meta.data %>%
+  mutate(sub_annotation = 
+           case_when(
+             sub_name == "Microglia 0" ~ "0 - Microglia",
+             sub_name == "Microglia 1" ~ "1 - Microglia CD74+/APC",
+             sub_name == "Microglia 2" ~ "2 - Microglia CD83+/Pro-Infl.",
+             sub_name == "Microglia 3" ~ "3 - Lymphoid/T cells",
+             sub_name == "Microglia 4" ~ "4 - PVM",
+             sub_name == "Microglia 5" ~ "5 - Microglia CD83+/Pro-Infl.",
+             sub_name == "Microglia 6" ~ "6 - B cells"
+           )
+  )
+
+Idents(so.filt) <- so.filt$sub_annotation
+```
+
+
+
+## A) Dimension Plot of Microglia Subtypes 
+
+```{r, fig.width=8, fig.height = 6}
+colors.micro <- ArchRPalettes$ironMan[1:7]
+names(colors.micro) <- levels(Idents(so.filt))
+
+fig3a <- DimPlot(so.filt, 
+        reduction = "umap.joint",
+        group.by = "sub_annotation",
+        cols = colors.micro
+        ) + 
+  ggtitle("Microglia") +
+  xlim(-12, -5) +
+  ylim(-15, -7.5) + 
+  theme(axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        plot.title = element_text(size = 24))
+
+fig3a
+
+```
+
+
+## B) Dotplot - markers of microglia subtypes 
+
+```{r, fig.width=9, fig.height = 6}
+subclusters <- unique(Idents(so.filt))
+idx_plot <- grep("^(1 - )|(2 - )|(5 - )|(0 - )", subclusters, perl = TRUE)
+
+levels(so.filt) <- rev(c("1 - Microglia CD74+/APC", "5 - Microglia CD83+/Pro-Infl.",
+                         "2 - Microglia CD83+/Pro-Infl.", "0 - Microglia",
+                     "3 - Lymphoid/T cells", "6 - B cells", "4 - PVM"))
+
+
+
+fig3b <- DotPlot(so.filt,
+        features = unique(c("CD74", "HLA-DRA", "C1QB", "TGFBR1",
+                            "IL1B", "CCL2", "CCL3",
+                            "SKAP1", "CD96", "CD247",
+                            "F13A1", "COLEC12", "MS4A4E",
+                            "TNFSF18", "CCL4", "CCL4L2", "NR4A1",
+                            "CD79A", "CD79B", "MS4A1", "PAX5", "BANK1")) ,
+        assay = 'SCT.corrected',
+        #group.by = "consensus.annot.simp.ha",
+        scale = FALSE,
+        #idents = subclusters[idx_plot],
+        cols = c("lightblue", "red"), dot.scale = 3) + 
+  theme(axis.text.x = element_text(angle = 90, size = 11, hjust = 1, vjust = 0.5),
+        axis.text.y = element_text(size = 14)) +
+  xlab("") +
+  ylab("")
+
+fig3b
+```
+
+
+
+## C) Feature plots - CD83, CCL2, CCL3, CD74,  HLA-DRA, HLA-DPA1
+
+```{r, fig.width=8, fig.height = 6}
+fig3c <- FeaturePlot(so.filt, 
+            reduction = "umap.joint",
+            features = c("CD83", "CCL2", "CCL3",
+                         "CD74", "HLA-DRA", "HLA-DPA1"),
+            slot = "data",
+            ncol = 3,
+            cols = c("lightblue", "red"),
+            max.cutoff = 2.5
+            #alpha = 0.2
+            ) &
+  xlim(-12, -5) &
+  ylim(-15, -8.5) &
+  NoLegend() &
+  theme(axis.line = element_blank(), 
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        plot.title = element_text(size = 24))
+
+fig3c
+
+```
+
+
+
+## D) Boxplots - Proportion of microglia subtypes in IIa, IIb and controls. Indicate p-values 
+
+```{r}
+# Step 1 - Get transformed props 
+
+#create celltype for speckle
+so@meta.data <- so@meta.data %>%
+  mutate(ct_speckle = 
+           case_when(
+             sub_name == "Microglia 0" ~ "0 - Microglia",
+             sub_name == "Microglia 1" ~ "1 - Microglia CD74+/APC",
+             sub_name == "Microglia 2" ~ "2 - Microglia Pro-Infl.",
+             sub_name == "Microglia 3" ~ "3 - Lymphoid/T cells",
+             sub_name == "Microglia 4" ~ "4 - PVM",
+             sub_name == "Microglia 5" ~ "5 - Microglia Pro-Infl.",
+             sub_name == "Microglia 6" ~ "6 - B cells",
+             TRUE ~ "Non-Micro"
+           )
+  )
+
+
+
+props <- getTransformedProps(clusters = so$ct_speckle, 
+                             sample = so$sample_rep, 
+                             transform= "logit")
+
+
+
+
+# Step 2 - Define experimental design for differential abundance testing 
+
+
+design <- data.frame(so@meta.data)[,c("sample_rep", 
+                                       "histological_assessment")]
+design <- distinct(design)
+rownames(design) <- design$sample
+
+design$histological_assessment <- factor(design$histological_assessment, 
+                                            levels = c("Normal", "FCD_typeIIa", "FCD_typeIIb"))
+
+## Reorder rownames to match columns of props$Counts
+design <- design[colnames(props$Counts), , drop=FALSE]
+all(rownames(design) == colnames(props$Counts))
+ 
+colnames(design)[2] <- "group"
+
+
+
+
+# Step 3 - Perform DA testing 
+
+## FCD IIa x Controls 
+# the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+contrast.1 <- c("groupFCD_typeIIa - groupNormal") 
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.1, levels=model)
+
+da_results_1 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_results_1
+
+
+## FCD IIb x Controls 
+
+contrast.2 <- c("groupFCD_typeIIb - groupNormal")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.2, levels=model)
+
+da_results_2 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_results_2
+
+
+
+## FCD IIb vs IIa 
+
+contrast.4 <- c("groupFCD_typeIIb - groupFCD_typeIIa")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.4, levels=model)
+
+da_results_3 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_results_3
+
+```
+
+```{r, fig.width=8, fig.height = 6}
+# Boxplots 
+df_plot <- reshape2::melt(props$Proportions, value.name = "prop")
+
+# Add donor condition
+df_plot <- left_join(df_plot, design, by = c("sample" = "sample_rep"))
+
+df_plot <- df_plot %>% 
+  mutate(group = case_match(group, 
+                           "FCD_typeIIa" ~ "FCD IIa",
+                           "FCD_typeIIb" ~ "FCD IIb",
+                           "Normal" ~ "Normal"),
+         prop_perc = prop*100) 
+  
+
+# Defining colors for the histological assessment
+ha_cols <- brewer.pal(3, "Dark2")
+names(ha_cols) <- c("FCD IIa", "FCD IIb", "Normal")
+
+# Defining a theme 
+my_theme <- theme_bw() +
+  theme(axis.text = element_text(size=12),
+        #axis.ticks.x = element_blank(),
+        #axis.text.x = element_blank(),
+        axis.title = element_text(face="plain", colour="black", size=12),
+        panel.background=element_blank(),
+        #panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        legend.text = element_text(face="plain", colour="black", size=12),
+        legend.title = element_blank(),
+        legend.position = c(0.9, 0.9),
+        legend.margin = NULL,
+        plot.title = element_text(face="plain", colour="black", size=14, hjust = 0)
+  ) 
+
+
+fig3d <- ggplot(df_plot %>% filter(group %in% c("FCD IIa", "FCD IIb", "Normal"),
+                          !clusters %in% "Non-Micro"),
+       aes(x = clusters, y=prop_perc, fill = group, color = group)) + 
+  #geom_jitter() +
+  #geom_violin(trim = FALSE, alpha = 0.5, na.rm = TRUE) +
+  geom_boxplot(
+               outlier.shape = NA,
+               na.rm = TRUE, 
+               width = 0.25,
+               fill = "white",
+               position=position_dodge(0.8)) +
+  geom_point(aes(fill = group, color = group),
+             position = position_jitterdodge(
+               jitter.width = 0.1,
+               jitter.height = 0,
+               dodge.width = 0.8),
+             alpha=0.3)+
+  labs(x = "", y = "Proportion (%)") +
+  scale_fill_manual(values = ha_cols ) +
+  scale_color_manual(values = ha_cols ) +
+  scale_x_discrete(labels = label_wrap(15)) +
+  ylim(0, 4) +
+  my_theme
+
+fig3d
+
+ggsave("outs/FiguresPaper/Figure3D.svg", 
+       fig3d,
+       dpi = 300, 
+       height = 6,
+       width = 8)
+
+```
+
+
+
+## F) Bubble Plot comparing GO terms in FCD IIb x Controls and FCD IIa x Controls 
+
+## G) Top Motifs and transcription factors in microglial subtypes (open chromatin analysis)
+
+## H) UMAP of motif activity if FCD IIb and Controls 
+
+# Figure S4 - Heatmap of subcluster markers
+
+```{r, fig.width=9, fig.height = 12}
+sub.markers %>%
+  group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > log2(1.5),
+                !gene %in% sex_genes,
+                !str_detect(gene, regex("\\.[0-9]$"))) %>%
+  slice_head(n = 10) %>%
+  ungroup() -> top10
+
+DoHeatmap(so.filt, 
+          features = top10$gene, 
+          group.colors = colors,
+          size = 4,
+           ) #+ NoLegend()
+
+```
+
+
+# Figure 5 - Impaired astrocyte differentiation and balloon cells in FCD 
+
+```{r}
+# Load monocle data 
+load("11_TrajectoryAnalysis/astro_11.1.RData")
+
+colData(astro)$pseudotime_discrete <- cut(colData(astro)$pseudotime, breaks = seq(0, 5, 0.25), labels = FALSE, dig.lab = 1)
+```
+
+
+## A) Monocle pseudotime - umap and trajectory
+
+```{r}
+fig5a <- plot_cells(astro,
+           cell_size = 1,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           graph_label_size=1.5) + 
+  theme(axis.ticks = element_blank(),
+        axis.text = element_blank(), 
+        axis.title = element_blank()) 
+
+fig5a
+```
+
+## B) UMAP - Selected marker genes differentially expressed along astrocyte differentiation trajectory
+- Progenitors - CD44, TNC, VCAN, GFAP
+- Differentiated - SLC1A3, SLC1A2, GPC5
+
+```{r}
+# Progenitor genes 
+fig5b1 <- plot_cells(astro,
+           genes = c("CD44", "TNC", "VCAN", "GFAP"), 
+           show_trajectory_graph = FALSE, 
+           label_cell_groups = FALSE, 
+           label_leaves = FALSE, 
+           cell_size = 1) + 
+  theme(strip.text.x = element_text(face = "bold", size = 12), 
+        axis.text = element_blank(), 
+        axis.title = element_blank(), 
+        axis.ticks = element_blank())
+
+fig5b1
+
+# Mature astrocyte genes 
+fig5b2 <- plot_cells(astro, 
+           genes = c("SLC1A2", "SLC1A3", "GPC5", "SOX5"),
+           show_trajectory_graph = F, 
+           label_cell_groups = FALSE, 
+           cell_size = 1, 
+           label_leaves = 1)+ 
+  theme(strip.text.x = element_text(face = "bold", size = 12), 
+        axis.text = element_blank(), 
+        axis.title = element_blank(), 
+        axis.ticks = element_blank())
+
+fig5b2
+
+```
+
+## C) UMAP by histological assessment and Barplot + line to show cellular condition along the differentiation - density plot
+
+```{r}
+# By histological assessment 
+fig5c1 <- plot_cells(astro,
+           cell_size = 1,
+           color_cells_by = "ha3",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_root = FALSE, 
+           label_branch_points=FALSE,
+           graph_label_size=1.5) + 
+  scale_color_manual(values = ha_cols) + 
+  labs(color = "Histological\nassessment") + theme(axis.ticks = element_blank(),
+        axis.text = element_blank(), 
+        axis.title = element_blank()) 
+
+fig5c1
+```
+
+```{r}
+
+df_plot <- colData(astro) %>% 
+  as.data.frame() %>% 
+  dplyr::group_by(pseudotime_discrete) %>% 
+  dplyr::count(ha3) %>% 
+  mutate(pseudotime_discrete = pseudotime_discrete/5, 
+         total = sum(n),
+         freq = n/total)
+
+fig5c2 <- ggplot(colData(astro), aes(x = pseudotime, color = ha3, fill = ha3)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic() + 
+  scale_color_manual(values = ha_cols) + 
+  scale_fill_manual(values = ha_cols) + 
+  labs(x = "Pseudotime", y = "Density", color = "Histological\nassessment", fill = "Histological\nassessment")
+fig5c2
+
+```
+
+## D) UMAP module scores - BC and RA signatures
+
+```{r}
+# Grab genes in both signatures 
+BC_CANDIDATE <- c("SCG2", "CHI3L1", "HSPB1", "IGFBP7", "GRB2", "ATCAY", "CDH2", "WARS", "RPS6KA2", "SDCBP", "KCNC1", "CNTN2", "C3", "NEAT1", "ANXA1", "MFAP4", "PHYKPL", "AGPAT5", "SPARC", "ANXA2", "HGF", "CAV1", "LINC01094", "C16orf89", "S100A16", "TAGLN", "TNC", "DCN", "LUM", "DMGDH", "NDUFA6", "MT1G", "AP3S1", "PRR5L", "NUDCD3", "AC104041.1")
+RA.sig <- read_excel("6_GSEA/Reactive_astrocyte_signatures.xlsx", skip = 4) %>% pull(`Pan-reactive astrocytes`)
+RA.sig <- str_replace(RA.sig, "SERPINA3N", "SERPINA3")
+
+# Group them as modules 
+modules <- data.frame(id=BC_CANDIDATE, Module=1) %>% rbind(data.frame(id=RA.sig, Module=2))
+
+fig5d1 <- plot_cells(astro, 
+           genes = modules, 
+           cell_size = 1.5, 
+           show_trajectory_graph = FALSE,
+          labels_per_group = 0) + 
+  theme(axis.text = element_blank(), 
+        axis.title = element_blank(), 
+        axis.ticks = element_blank())
+
+fig5d1
+
+```
+
+Here, Module 1 corresponds to the balloon cell signature and Module 2 corresponds to the reactive astrocyte signature.
+
+Also add bar plots:
+
+```{r}
+
+colData(astro)$active.BC.factor <- factor(colData(astro)$active.BC, levels = c(0,1))
+
+# See balloon cell distribution across pseudotime
+df_plot <- colData(astro) %>% 
+  as.data.frame() %>% 
+  dplyr::select(pseudotime_discrete, ha3, active.BC) %>%
+  dplyr::group_by(ha3) %>% 
+  dplyr::mutate(total = n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::group_by(pseudotime_discrete, ha3) %>%
+  dplyr::summarise(n = sum(active.BC/total)*100)
+df_plot
+
+fig5d2_bc <- ggplot(df_plot, aes(x = pseudotime_discrete, y = n, color = ha3, fill = ha3)) + 
+  geom_col(position = "dodge") + 
+  #geom_smooth(method = "loess", se = FALSE, color = "black", fill = "black") +  
+  theme_classic() + 
+  scale_color_manual(values = ha_cols) +
+  scale_fill_manual(values = ha_cols) +
+  scale_x_continuous(breaks = seq(0,20,4), labels = seq(0,5,1)) +
+  theme_classic() + 
+  labs(x = "Pseudotime", y = "Proportion of cells") + 
+  theme(axis.text = element_text(size = 12), 
+        axis.title = element_text(size = 14))
+
+fig5d2_bc
+
+
+df_plot <- colData(astro) %>% 
+  as.data.frame() %>% 
+  dplyr::select(pseudotime_discrete, ha3, is.panreactive_astro) %>%
+  dplyr::group_by(ha3) %>% 
+  dplyr::mutate(total = n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::group_by(pseudotime_discrete, ha3) %>%
+  dplyr::summarise(n = sum(is.panreactive_astro/total)*100)
+df_plot
+
+fig5d2_ra <- ggplot(df_plot, aes(x = pseudotime_discrete, y = n, color = ha3, fill = ha3)) + 
+  geom_col(position = "dodge") + 
+  #geom_smooth(method = "loess", se = FALSE, color = "black", fill = "black") +  
+  theme_classic() + 
+  scale_color_manual(values = ha_cols) +
+  scale_fill_manual(values = ha_cols) +
+  scale_x_continuous(breaks = seq(0,20,4), labels = seq(0,5,1)) +
+  theme_classic() + 
+  labs(x = "Pseudotime", y = "Number of cells") + 
+  theme(axis.text = element_text(size = 12), 
+        axis.title = element_text(size = 14))
+
+fig5d2_ra
+
+```
+
+
+## E) Expression of selected BC and RA genes differentially expressed in the disease 
+
+
+```{r, supress = TRUE}
+# Divide bt histological assessment
+
+astro_bc <- astro[BC_CANDIDATE,]
+  
+# Plot all genes in the BC signature 
+data <- exprs(astro_bc) %>% as.data.frame() %>% t()
+data <- data %>% cbind(as.data.frame(colData(astro))) 
+
+plot_genes_ha <- function(gene){
+  
+  fig5e <- ggplot(data, aes_string(x = "pseudotime", y = gene, color = "ha3", fill = "ha3")) + 
+    geom_smooth(method = "loess", se = TRUE) + 
+    theme_classic() + 
+    labs(x = "Pseudotime", y = "Gene Expression", title = gene) + 
+    theme(axis.text = element_text(size = 12), 
+          axis.title = element_text(size = 14),
+          plot.title = element_text(size = 20, hjust = 0.5)) + 
+    scale_color_manual(values = ha_cols) + 
+    scale_fill_manual(values = ha_cols)
+  
+} 
+
+lapply(BC_CANDIDATE, plot_genes_ha)
+```
+
+```{r, supress = TRUE}
+# Divide bt histological assessment
+
+astro_ra <- astro[RA.sig, ]
+
+data <- exprs(astro_ra) %>% as.data.frame() %>% t()
+data <- data %>% cbind(colData(astro_ra) %>% as.data.frame())
+
+plot_genes_ha <- function(gene){
+  
+  fig5e <- ggplot(data, aes_string(x = "pseudotime", y = gene, color = "ha3", fill = "ha3")) + 
+    geom_smooth(method = "loess", se = TRUE) + 
+    theme_classic() + 
+    labs(x = "Pseudotime", y = "Gene Expression", title = gene) + 
+    theme(axis.text = element_text(size = 12), 
+          axis.title = element_text(size = 14),
+          plot.title = element_text(size = 20, hjust = 0.5)) + 
+    scale_color_manual(values = ha_cols) + 
+    scale_fill_manual(values = ha_cols)
+  
+} 
+
+lapply(RA.sig, plot_genes_ha)
+```
+
+
+
+
+# Figure S1
+
+## A) Clustering 
+
+```{r s1a, fig.height = 6, fig.width = 8}
+figs1a <- DimPlot(so, 
+                  reduction = "umap.joint", 
+                  group.by = "seurat_clusters", 
+                  cols = set_qual_pal(length(unique(so$seurat_clusters)))) +
+            labs(title = "Clustering") +
+            theme(plot.title = element_text(size = 24),
+                  legend.position = "none")
+
+figs1a <- LabelClusters(figs1a,
+                      "seurat_clusters",
+                      repel = TRUE, 
+                      box = TRUE,
+                      size = 6,
+                      fill = "white",  
+                      segment.color = 'grey50',
+                      fontface = 'bold',
+                      alpha = 0.5,
+                      segment.alpha = 0.8,
+                      label.size = NA,
+                      force = 2,
+                      segment.size = 0.5,
+                      arrow = arrow(length = unit(0.01, 'npc'))
+  )
+
+figs1a
+
+```
+
+
+## B) Heatmap - clusters vs. cell type by Azimuth annotation 
+
+```{r s1b, fig.height = 6, fig.width=9}
+res <- so@meta.data %>% 
+  dplyr::select(c("predicted.subclass", "predicted.subclass.score", 'seurat_clusters')) %>%
+  mutate(seurat_clusters = as.numeric(seurat_clusters)) %>%
+  tibble::rownames_to_column(var = "barcodes")
+
+# Cell type frequency by cluster
+g2 <- res %>%
+  group_by(seurat_clusters, predicted.subclass) %>%
+  dplyr::summarise(cnt = n()) %>%
+  mutate(freq = (cnt / sum(cnt))
+)
+
+mat <- g2 %>% 
+  select(c("seurat_clusters", "predicted.subclass", "freq"))
+
+data_wide <- dcast(mat, seurat_clusters ~ predicted.subclass, value.var="freq") %>% 
+  arrange(seurat_clusters)
+
+rownames(data_wide) <- paste0("C_", data_wide$seurat_clusters)
+
+figs1b <- pheatmap(data_wide[, -1],
+         cluster_rows = F,
+         cluster_cols = F,
+         #scale = "row",
+         scale = "none",
+         #breaks = seq(0, 0.5, by=0.01),
+         color = brewer.pal(9, "BuPu"),
+         fontsize_row = 9,
+         fontsize_col = 18
+         )
+
+figs1b
+```
+
+## D) Cellular Composition for each sample
+
+```{r}
+df <- so@meta.data %>% 
+  mutate(seurat_clusters = as.numeric(seurat_clusters))
+levels_clusters <- unique(df$seurat_clusters)
+df <- df %>% 
+  mutate(seurat_clusters = factor(seurat_clusters, levels = rev(sort(levels_clusters))), 
+         sample_rep = factor(sample_rep, levels = rev(unique(so$sample_rep))))
+cell_types <- c("Astro", "EN Upper", "EN Deeper", "Endo", "IN", "Microglia", 
+                "Oligo", "OPC", "OPC Diff.", "Unknown", "VLMC")
+df <- df %>% mutate(consensus.annot.simp = factor(consensus.annot.simp, levels = rev(cell_types)),
+                    sample_rep = factor(sample_rep, levels = rev(c("G150_D", "G171_D", "G187_D", "G120_D.2", "G120_D.3", "G133_D.2", "G129_D", "G159_D", "G210_D", "G120_N.1", "G133_N.2"))))
+```
+
+```{r, fig.height = 3, fig.width = 6}
+
+# counts
+data <- df %>% 
+  dplyr::group_by(sample_rep) %>% 
+  dplyr::mutate(count_cluster = n()) %>% 
+  dplyr::group_by(sample_rep, consensus.annot.simp) %>% 
+  dplyr::mutate(count_level_cluster = n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::select(consensus.annot.simp, sample_rep,
+                count_cluster, count_level_cluster) %>% 
+  distinct()
+
+# proportions for readability
+data <- data %>% 
+  dplyr::mutate(prop_level_cluster = count_level_cluster / count_cluster)
+
+# Now plot data for selected level proportions
+plot_data <- data %>% dplyr::select(consensus.annot.simp, count_cluster, prop_level_cluster, count_level_cluster, sample_rep) %>% distinct() %>% arrange(desc(consensus.annot.simp))
+
+plot_labels <- plot_data %>% 
+  dplyr::group_by(sample_rep) %>% 
+  dplyr::summarise(label_level = paste(count_level_cluster, collapse = ", "))
+
+prop_plot <- ggplot(plot_data, aes(x = prop_level_cluster, y = sample_rep)) +
+  geom_bar(aes(fill = consensus.annot.simp), stat = "identity") + 
+  geom_text(data = plot_labels,
+            aes(x  = 1.03, y = sample_rep, label = label_level), hjust = 0,
+            size = 2.5) +
+  coord_cartesian(clip = "off") + 
+  scale_fill_manual(values = colors) +  
+  theme(panel.background = element_blank(), 
+        legend.position = "left",
+        legend.title = element_blank(), 
+        axis.text = element_text(size = 12), 
+        axis.title = element_text(size = 14)) + 
+  xlim(0, 1.5) +
+  ylab("Sample") +
+  xlab("Propotion of cells from each cell type")  +
+  guides(fill = guide_legend(reverse = T)) 
+prop_plot
+
+```
+
+## C) Cellular composition of each cluster 
+
+```{r, fig.width = 6, fig.height = 3}
+
+Idents(so) <- "consensus.annot.simp"
+unique(so$sample_rep)
+
+so@meta.data <- so@meta.data %>% 
+  mutate(sample_rep = factor(sample_rep, levels = rev(c("G150_D", "G171_D", "G187_D", "G120_D.2", "G120_D.3", "G133_D.2", "G129_D", "G159_D", "G210_D", "G120_N.1", "G133_N.2"))))
+
+df <- so@meta.data %>% 
+  mutate(seurat_clusters = as.numeric(seurat_clusters))
+levels_clusters <- unique(df$seurat_clusters)
+df <- df %>% 
+  mutate(seurat_clusters = factor(seurat_clusters, levels = rev(sort(levels_clusters))))
+
+colors_sample <- set_qual_pal(11)
+names(colors_sample) <- unique(so$sample_rep)
+
+clust_lvl_prop(df = df, 
+               col_palette = colors_sample, 
+               lvl_analysis = "sample_rep") +
+  theme(legend.position = "left",
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12)) + 
+  labs(fill = "Sample")
+```
+
+
+# Figure S2 - mTORC1 signature
+
+## Using the top 5%. 
+
+Here we are computing AUC scores using the top 5% expressed genes.  
+
+Mostly all genes in the signature are also present in the scRNA-seq dataset. There is warning that only 2 genes (2 out of 200) were not found. 
+
+```{r}
+load("outs/6.2_AUCell_cells_rankings.RData")
+
+geneSetName <- "HALLMARK_MTORC1_SIGNALING"
+GS.hallmark <- getGeneSets(library = "H", gene.sets = "HALLMARK_MTORC1_SIGNALING")
+
+length(intersect(x = rownames(GetAssayData(so, slot = 'counts')),  y =   GS.hallmark[["HALLMARK_MTORC1_SIGNALING"]]@geneIds)) # number of genes found in the signature
+
+
+geneSet <- GeneSetCollection(GS.hallmark)
+
+cells_AUC <- AUCell_calcAUC(geneSet, cells_rankings, 
+                            aucMaxRank = ceiling(0.05 * nrow(cells_rankings)) )
+so$AUC.score <- getAUC(cells_AUC)[geneSetName,]
+
+```
+
+Obtain cells with active signature (cells_assignment) and the selected threshold. About 130 cells were called as active for mTOR. The automatic threshold for active cells is ~0.1, which means that about 10% of genes in the signature were recovered in the top-expressing genes.
+
+```{r}
+par(mfrow=c(1,1)) 
+cells_assignment <- AUCell_exploreThresholds(cells_AUC, plotHist=TRUE, assign=TRUE)
+
+selectedThresholds <- getThresholdSelected(cells_assignment)
+
+selectedThresholds
+
+so$is.MTOR <- ifelse(colnames(so) %in% 
+         cells_assignment$HALLMARK_MTORC1_SIGNALING$assignment, 1, 0)
+
+length(cells_assignment$HALLMARK_MTORC1_SIGNALING$assignment)
+
+cells_assignment$HALLMARK_MTORC1_SIGNALING$aucThr
+
+```
+
+
+## A) Violin Plots of cell types with different mTOR
+
+```{r}
+
+# Wilcoxon test 
+
+# Statistical test comparing FCD subtypes and normal 
+wilcox_all <- function(ha1, ha2, alternative = "two.sided"){ 
+
+  df <- data.frame()
+  
+  for (ct in unique(so$consensus.annot.simp)){
+  test <- wilcox.test(AUC.score ~ ha3, data = so@meta.data %>% filter(ha3 %in% c(ha1, ha2), consensus.annot.simp == ct), alternative = alternative)
+  
+  cat(ct, ha1, " x ", ha2, ": p = ", test$p.value, "\n")
+  df <- rbind(df, data.frame(ha1 = ha1, ha2 = ha2, cell_type = ct, p.value = test$p.value))
+  #return(test)
+  
+  }
+  
+  return(df)
+}
+
+ha1 <- "FCD IIa"
+ha2 <- "FCD IIb"
+han <- "Normal"
+df1 <- wilcox_all(ha1, han)
+df2 <- wilcox_all(ha2, han)
+df3 <- wilcox_all(ha2, ha1)
+df <- rbind(df1, df2, df3)
+
+
+asterisks <- function(x){
+  
+  if (x < 0.0001){
+    test <- "****"
+  } else if (x < 0.001){
+    test <- "***"
+  } else if (x < 0.01){
+    test <- "**"
+  } else if (x < 0.05){
+    test <- "*"
+  } else {
+    test <- ""
+  }
+
+  return(test)  
+
+}
+
+plot_custom_ha <- function(ct, variable = "AUC.score", title = ct){
+   
+  so_sub <- subset(so, consensus.annot.simp == ct)
+  
+  print(dittoPlot(so_sub, 
+          var = variable,
+          group.by = "ha3", 
+          plots = c("jitter", "vlnplot", "boxplot"), 
+          jitter.size = 0.1,
+          ylab = "Enrichment Score",
+          main = title,
+          theme = theme_classic() + theme(plot.title = element_text(size = 16, hjust = 0.5), 
+          axis.text.y = element_text(size = 14),
+          axis.title.y = element_text(size = 14)),
+          min = 0,
+          max = 0.21) + 
+  scale_fill_manual(values = ha_cols) + 
+  labs(fill = "Histological\nassessment") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank()) + 
+  annotate(geom = "segment", x = 1.05, xend = 1.95, y = 0.165, yend = 0.165, linewidth = 1.3) +
+  annotate(geom = "segment", x = 2.05, xend = 2.95, y = 0.165, yend = 0.165, linewidth = 1.3) +
+  annotate(geom = "segment", x = 1.05, xend = 2.95, y = 0.195, yend = 0.195, linewidth = 1.3) +
+  annotate(geom = "text", x = 1.5, y = 0.17, label = asterisks(df %>% filter(ha1 == "FCD IIb", ha2 == "FCD IIa", cell_type == ct) %>% pull(p.value)), size = 10) + 
+  annotate(geom = "text", x = 2.5, y = 0.17, label = asterisks(df %>% filter(ha1 == "FCD IIb", ha2 == "Normal", cell_type == ct) %>% pull(p.value)), size = 10) + 
+  annotate(geom = "text", x = 2, y = 0.2, label = asterisks(df %>% filter(ha1 == "FCD IIa", ha2 == "Normal", cell_type == ct) %>% pull(p.value)), size = 10))
+  
+}
+
+lapply(levels(so$consensus.annot.simp), plot_custom_ha)
+
+```
+
+## B) Feature plots showing mTOR active cells by condition 
+
+```{r}
+p1 <- FeaturePlot(so, features = "is.MTOR", 
+            reduction = "umap.joint", 
+            split.by = "ha3",
+            cols = c("lightgrey", "red"),
+            order = TRUE) &
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(), 
+        axis.ticks = element_blank())
+
+p1
+
+```
+
+# Figure S3 - Neuronal Subtypes 
+
+## A) Boxplot of changes in cellular composition of excitatory neurons computed with Speckle
+
+```{r}
+
+# Filter for if the predicted.cluster has more than 20 cells in each histological_assessment 
+filt1 <- so@meta.data %>% 
+  filter(histological_assessment %in% c("FCD_typeIIa", "Normal")) %>% 
+  dplyr::count(predicted.cluster, histological_assessment) %>%
+  filter(n>20) %>% 
+  group_by(predicted.cluster) %>% 
+  dplyr::summarise(n = n()) %>% 
+  filter(n > 1) %>% 
+  pull(predicted.cluster)
+
+filt2 <- so@meta.data %>% 
+  filter(histological_assessment %in% c("FCD_typeIIb", "Normal")) %>% 
+  dplyr::count(predicted.cluster, histological_assessment) %>%
+  filter(n>20) %>% 
+  group_by(predicted.cluster) %>% 
+  dplyr::summarise(n = n()) %>% 
+  filter(n > 1) %>% 
+  pull(predicted.cluster)
+
+filt4 <- so@meta.data %>% 
+  filter(histological_assessment %in% c("FCD_typeIIa", "FCD_typeIIb")) %>% 
+  dplyr::count(predicted.cluster, histological_assessment) %>%
+  filter(n>20) %>% 
+  group_by(predicted.cluster) %>% 
+  dplyr::summarise(n = n()) %>% 
+  filter(n > 1) %>% 
+  pull(predicted.cluster)
+
+
+Idents(so) <- so$predicted.cluster
+so$group <- so$histological_assessment
+
+```
+
+
+```{r}
+cell_types <- unique(so$predicted.cluster)
+exc <- cell_types[str_detect(cell_types, "^Exc")]
+fcd <- subset(so, predicted.cluster %in% exc)
+```
+
+### Step 1 - Obtain transformed proportions by sample
+
+```{r}
+props <- getTransformedProps(clusters = fcd$predicted.cluster, 
+                             sample = fcd$sample_rep, 
+                             transform= "logit")
+
+#props
+```
+
+
+### Step 2 - Define the experimental design for differential abundance testing:
+
+```{r}
+design <- data.frame(fcd@meta.data)[,c("sample_rep", 
+                                       "histological_assessment")]
+design <- distinct(design)
+rownames(design) <- design$sample
+
+design$histological_assessment <- factor(design$histological_assessment, 
+                                            levels = c("Normal", "FCD_typeIIa", "FCD_typeIIb"))
+
+## Reorder rownames to match columns of props$Counts
+design <- design[colnames(props$Counts), , drop=FALSE]
+all(rownames(design) == colnames(props$Counts))
+
+colnames(design)[2] <- "group"
+
+design
+```
+
+### Step 3 - Perform DA (differential abundance) testing: 
+
+#### FCD IIa vs controls
+
+```{r}
+# the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+contrast.1 <- c("groupFCD_typeIIa - groupNormal") 
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.1, levels=model)
+mod.constrast
+
+da_resuts_1 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_resuts_1
+
+```
+Filter the results for those having at least 20 cells in each group:
+
+Decreased:
+
+```{r}
+decIIa <- da_resuts_1 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt1, P.Value < 0.1, PropMean.groupNormal > PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+decIIa
+```
+Increased:
+
+```{r}
+incIIa <- da_resuts_1 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt1, P.Value < 0.1, PropMean.groupNormal < PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+incIIa
+```
+
+
+
+
+#### FCD IIb vs controls
+
+```{r}
+contrast.2 <- c("groupFCD_typeIIb - groupNormal")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.2, levels=model)
+mod.constrast
+
+da_resuts_2 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_resuts_2
+
+```
+
+Decreased:
+
+```{r}
+decIIb <- da_resuts_2 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt2, P.Value < 0.1, PropMean.groupNormal > PropMean.groupFCD_typeIIb) %>% 
+  select(cluster, P.Value, everything())
+decIIb
+```
+Increased:
+
+```{r}
+incIIb <- da_resuts_2 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt2, P.Value < 0.1, PropMean.groupNormal < PropMean.groupFCD_typeIIb) %>% 
+  select(cluster, P.Value, everything())
+incIIb
+```
+
+
+
+#### FCD IIb vs IIa
+
+
+```{r}
+contrast.4 <- c("groupFCD_typeIIb - groupFCD_typeIIa")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.4, levels=model)
+mod.constrast
+
+da_resuts_4 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_resuts_4
+
+```
+
+Decreased:
+
+```{r}
+decIIs <- da_resuts_4 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt4, P.Value < 0.1, PropMean.groupFCD_typeIIb > PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+decIIs
+```
+Increased:
+
+```{r}
+incIIs <- da_resuts_4 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt4, P.Value < 0.1, PropMean.groupFCD_typeIIb < PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+incIIs
+```
+
+
+### Boxplots
+
+Prepare the data and plot proportions for all cell types. 
+
+```{r, fig.height=5, fig.width=10}
+
+df_plot <- melt(props$Proportions, value.name = "prop")
+
+# Add donor condition
+df_plot <- left_join(df_plot, design, by = c("sample" = "sample_rep"))
+
+df_plot <- df_plot %>% 
+  mutate(group = case_match(group, 
+                           "FCD_typeIIa" ~ "FCD IIa",
+                           "FCD_typeIIb" ~ "FCD IIb",
+                           "Normal" ~ "Normal"))
+
+# Defining colors for the histological assessment
+ha_cols <- brewer.pal(3, "Dark2")
+names(ha_cols) <- c("FCD IIa", "FCD IIb", "Normal")
+
+# Defining a theme 
+my_theme <- theme_bw() +
+  theme(axis.text.x = element_text(size=8),
+        #axis.ticks.x = element_blank(),
+        #axis.text.x = element_blank(),
+        axis.title = element_text(face="plain", colour="black", size=12),
+        panel.background=element_blank(),
+        #panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        legend.text = element_text(face="plain", colour="black", size=12),
+        legend.title = element_blank(),
+        legend.position = "bottom",
+        plot.title = element_text(face="plain", colour="black", size=14, hjust = 0)
+  ) 
+
+```
+
+
+Plot only affected cell types:
+
+```{r, fig.height=5, fig.width=5}
+
+ggplot(df_plot %>% filter(clusters %in% bind_rows(list(decIIa, decIIb, decIIs, incIIa, incIIb, incIIs))$cluster),
+       aes(x = clusters, y=prop, fill = group, color = group)) + 
+  #geom_jitter() +
+  #geom_violin(trim = FALSE, alpha = 0.5, na.rm = TRUE) +
+  geom_boxplot(
+               outlier.shape = NA,
+               na.rm = TRUE, 
+               width = 0.25,
+               fill = "white",
+               position=position_dodge(0.8)) +
+  geom_point(aes(fill = group, color = group),
+             position = position_jitterdodge(
+               jitter.width = 0.1,
+               jitter.height = 0,
+               dodge.width = 0.8),
+             alpha=0.3)+
+  labs(x = "", y = "Proportion") +
+  scale_x_discrete(labels = label_wrap(10)) +
+  scale_fill_manual(values = ha_cols ) +
+  scale_color_manual(values = ha_cols ) +
+  my_theme
+
+```
+
+
+## B) Barplots of exc. neuronal subtypes with highest number of up- and downregulated genes in FCD IIa vs Control and FCD IIb vs Control
+
+## C) Boxplot of changes in cellular composition of inhibitory neurons computed with Speckle
+
+```{r}
+cell_types <- unique(so$predicted.cluster)
+inh <- cell_types[str_detect(cell_types, "^Inh")]
+fcd <- subset(so, predicted.cluster %in% inh)
+```
+
+### Step 1 - Obtain transformed proportions by sample
+
+```{r}
+props <- getTransformedProps(clusters = fcd$predicted.cluster, 
+                             sample = fcd$sample_rep, 
+                             transform= "logit")
+
+#props
+```
+
+
+### Step 2 - Define the experimental design for differential abundance testing:
+
+```{r}
+design <- data.frame(fcd@meta.data)[,c("sample_rep", 
+                                       "histological_assessment")]
+design <- distinct(design)
+rownames(design) <- design$sample
+
+design$histological_assessment <- factor(design$histological_assessment, 
+                                            levels = c("Normal", "FCD_typeIIa", "FCD_typeIIb"))
+
+## Reorder rownames to match columns of props$Counts
+design <- design[colnames(props$Counts), , drop=FALSE]
+all(rownames(design) == colnames(props$Counts))
+
+colnames(design)[2] <- "group"
+
+design
+```
+
+### Step 3 - Perform DA (differential abundance) testing: 
+
+#### FCD IIa vs controls
+
+```{r}
+# the syntax is <VariableName><ConditionLevel> - <VariableName><ControlLevel>
+contrast.1 <- c("groupFCD_typeIIa - groupNormal") 
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.1, levels=model)
+mod.constrast
+
+da_resuts_1 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_resuts_1
+
+```
+Filter the results for those having at least 20 cells in each group:
+
+Decreased:
+
+```{r}
+decIIa <- da_resuts_1 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt1, P.Value < 0.1, PropMean.groupNormal > PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+decIIa
+```
+Increased:
+
+```{r}
+incIIa <- da_resuts_1 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt1, P.Value < 0.1, PropMean.groupNormal < PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+incIIa
+```
+
+
+
+
+#### FCD IIb vs controls
+
+```{r}
+contrast.2 <- c("groupFCD_typeIIb - groupNormal")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.2, levels=model)
+mod.constrast
+
+da_resuts_2 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_resuts_2
+
+```
+
+Decreased:
+
+```{r}
+decIIb <- da_resuts_2 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt2, P.Value < 0.1, PropMean.groupNormal > PropMean.groupFCD_typeIIb) %>% 
+  select(cluster, P.Value, everything())
+decIIb
+```
+Increased:
+
+```{r}
+incIIb <- da_resuts_2 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt2, P.Value < 0.1, PropMean.groupNormal < PropMean.groupFCD_typeIIb) %>% 
+  select(cluster, P.Value, everything())
+incIIb
+```
+
+
+
+#### FCD IIb vs IIa
+
+
+```{r}
+contrast.4 <- c("groupFCD_typeIIb - groupFCD_typeIIa")
+
+model <- model.matrix(~ 0 + group, data=design)
+mod.constrast <- makeContrasts(contrasts=contrast.4, levels=model)
+mod.constrast
+
+da_resuts_4 <- propeller.ttest(props, model, contrasts = mod.constrast, 
+                robust=TRUE, trend=FALSE, 
+                sort=TRUE)
+
+da_resuts_4
+
+```
+
+Decreased:
+
+```{r}
+decIIs <- da_resuts_4 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt4, P.Value < 0.1, PropMean.groupFCD_typeIIb > PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+decIIs
+```
+Increased:
+
+```{r}
+incIIs <- da_resuts_4 %>% 
+  rownames_to_column("cluster") %>% 
+  filter(cluster %in% filt4, P.Value < 0.1, PropMean.groupFCD_typeIIb < PropMean.groupFCD_typeIIa) %>% 
+  select(cluster, P.Value, everything())
+incIIs
+```
+
+
+### Boxplots
+
+Prepare the data and plot proportions for all cell types. 
+
+```{r, fig.height=5, fig.width=10}
+
+df_plot <- melt(props$Proportions, value.name = "prop")
+
+# Add donor condition
+df_plot <- left_join(df_plot, design, by = c("sample" = "sample_rep"))
+
+df_plot <- df_plot %>% 
+  mutate(group = case_match(group, 
+                           "FCD_typeIIa" ~ "FCD IIa",
+                           "FCD_typeIIb" ~ "FCD IIb",
+                           "Normal" ~ "Normal"))
+
+# Defining colors for the histological assessment
+ha_cols <- brewer.pal(3, "Dark2")
+names(ha_cols) <- c("FCD IIa", "FCD IIb", "Normal")
+
+# Defining a theme 
+my_theme <- theme_bw() +
+  theme(axis.text.x = element_text(size=12),
+        #axis.ticks.x = element_blank(),
+        #axis.text.x = element_blank(),
+        axis.title = element_text(face="plain", colour="black", size=14),
+        panel.background=element_blank(),
+        #panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        legend.text = element_text(face="plain", colour="black", size=12),
+        legend.title = element_blank(),
+        legend.position = "bottom",
+        plot.title = element_blank()
+  ) 
+
+```
+
+
+Plot only affected cell types:
+
+```{r, fig.height=5, fig.width=5}
+
+ggplot(df_plot %>% filter(clusters %in% bind_rows(list(decIIa, decIIb, decIIs, incIIa, incIIb, incIIs))$cluster),
+       aes(x = clusters, y=prop, fill = group, color = group)) + 
+  #geom_jitter() +
+  #geom_violin(trim = FALSE, alpha = 0.5, na.rm = TRUE) +
+  geom_boxplot(
+               outlier.shape = NA,
+               na.rm = TRUE, 
+               width = 0.25,
+               fill = "white",
+               position=position_dodge(0.8)) +
+  geom_point(aes(fill = group, color = group),
+             position = position_jitterdodge(
+               jitter.width = 0.1,
+               jitter.height = 0,
+               dodge.width = 0.8),
+             alpha=0.3)+
+  labs(x = "", y = "Proportion") +
+  scale_x_discrete(labels = label_wrap(10)) +
+  scale_fill_manual(values = ha_cols ) +
+  scale_color_manual(values = ha_cols ) +
+  my_theme
+```
+
+
+
+## D) Barplots of inh. neuronal subtypes with highest number of up- and downregulated genes in FCD IIa vs Control and FCD IIb vs Control
+
+
+
+# Figure S5 - Links predicted for microglia genes in FCD IIb vs Control
+
+## A) C1QA
+
+## B) C1QB 
+
+# Reproducibility
+
+This document was last rendered on: `r Sys.time()`.
+
+<details>
+
+<summary>**Session Info**</summary>
+
+```{r}
+sessionInfo()
+```
+
+</details>
